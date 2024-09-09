@@ -65,7 +65,7 @@ async function getAudit(ticket_id, subdomain, headers) {
   let json = await result.json();
   let audits = json.audits;
   for (const audit of audits) {
-    if (audit.via.channel == 'email'){
+    if (audit.via.channel == 'email') {
       console.log(audit);
       var recipients = audit.via.source.from.original_recipients;
       console.log("recipients", recipients);
@@ -73,13 +73,67 @@ async function getAudit(ticket_id, subdomain, headers) {
     }
   }
 }
+
+async function uploadFileToZendesk(fileBuffer, fileName, contentType, subdomain, token) {
+
+  const response = await fetch(`https://${subdomain}.zendesk.com/api/v2/uploads.json?filename=${fileName}`, {
+    method: 'POST',
+    headers: {
+      "Authorization": "Basic " + token,
+      "Content-Type": contentType
+    },
+    body: fileBuffer
+  });
+
+  const data = await response.json();
+
+  return data.upload.token;
+}
+
+async function fetchAndCloneAttachments(ticket_id, subdomain, headers) {
+  const init = {
+    method: "GET",
+    headers
+  };
+  const uploadTokens = [];
+
+  const result = await fetch(`https://${subdomain}.zendesk.com/api/v2/tickets/${ticket_id}/comments`, init);
+  const json = await result.json();
+
+  for (const comment of json.comments) {
+    const attachments = comment.attachments; 
+    
+    if (attachments && attachments.length > 0) {
+
+      for (const attachment of attachments) {
+        const { content_url, file_name, content_type } = attachment;
+
+        const attachmentResult = await fetch(content_url);
+        const arrayBuffer = await attachmentResult.arrayBuffer();
+
+        const uploadToken = await uploadFileToZendesk(arrayBuffer, file_name, content_type, subdomain, headers.Authorization);
+        uploadTokens.push(uploadToken);
+
+        console.log(`Archivo ${file_name} subido con éxito. Token: ${uploadToken}`);
+      }
+    }
+  }
+
+  return uploadTokens;
+}
+
+
 async function createTicket(ticket, recipient, ticket_id, subdomain, headers) {
+  const attachmentsTokens = await fetchAndCloneAttachments(ticket_id, subdomain, headers);
+
   var payload = {
     "ticket": {
       "subject": ticket.subject,
       "comment": {
-        "html_body": `Split from ticket #${ticket_id}<br>${ticket.description}`
+        "html_body": `Ticket clonado de: #${ticket_id}<br>${ticket.description}`,
+        "uploads": attachmentsTokens
       },
+      "tags": ["ticket_clone"],
       "recipient": recipient,
       "requester_id": ticket.requester_id,
       "via": {
@@ -87,12 +141,13 @@ async function createTicket(ticket, recipient, ticket_id, subdomain, headers) {
       }
     }
   };
+
   const init = {
     method: "POST",
     headers,
     body: JSON.stringify(payload)
   };
-  const result = await fetch("https://" + subdomain + ".zendesk.com/api/v2/tickets.json", init);
+  const result = await fetch("https://" + subdomain + ".zendesk.com/api/v2/tickets.json", init);  
   var json = await result.json();
   return json.audit.ticket_id;
 }
