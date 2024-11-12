@@ -131,7 +131,8 @@ async function createTicket(ticket, recipient, ticket_id, subdomain, headers) {
       "subject": ticket.subject,
       "comment": {
         "html_body": `Ticket clonado de: #${ticket_id}<br>${ticket.description}`,
-        "uploads": attachmentsTokens
+        "uploads": attachmentsTokens,
+        "public": false
       },
       "tags": ["ticket_clone"],
       "recipient": recipient,
